@@ -1,0 +1,53 @@
+[project]
+name = "remates-scraper"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "juan", email = "juanlaranas@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.42.97",
+    "httpx>=0.28.1",
+    "pdfplumber>=0.11.9",
+    "pillow>=12.2.0",
+    "playwright>=1.58.0",
+    "psycopg[binary]>=3.3.3",
+    "pydantic>=2.13.3",
+    "python-dotenv>=1.2.2",
+    "requests>=2.33.1",
+    "scrapy>=2.15.2",
+]
+
+[project.scripts]
+remates-scraper = "remates_scraper:main"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.2",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.12",
+    "types-requests>=2.33.0.20260408",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
