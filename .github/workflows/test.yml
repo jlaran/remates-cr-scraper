@@ -1,0 +1,50 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: remates_test
+        ports:
+          - 5499:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+
+      - name: Apply migrations
+        run: |
+          # Note: this assumes the web repo is checked out beside this one in CI.
+          # For now, we ship the migration SQL inside the scraper repo for CI use,
+          # OR we apply just enough schema for the tests. Simplest: skip integration
+          # tests in CI for now and run unit tests only.
+          echo "skipping migrations in CI for v0.1; integration tests run locally"
+
+      - name: Lint
+        run: uv run ruff check src/ tests/
+
+      - name: Type check
+        run: uv run mypy src/
+
+      - name: Unit tests
+        run: uv run pytest tests/unit/ -v

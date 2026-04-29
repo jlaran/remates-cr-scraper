@@ -1,0 +1,101 @@
+name: scrape
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 08:00 UTC = 02:00 Costa Rica time, daily
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: 'Comma-separated sources to run, or "all"'
+        default: 'all'
+
+jobs:
+  bcr:
+    if: github.event_name == 'schedule' || contains(github.event.inputs.sources, 'all') || contains(github.event.inputs.sources, 'bcr')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run playwright install chromium --with-deps
+      - run: uv run python -m remates_scraper.jobs.run_spider bcr
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  judicial:
+    if: github.event_name == 'schedule' || contains(github.event.inputs.sources, 'all') || contains(github.event.inputs.sources, 'judicial')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run python -m remates_scraper.jobs.run_spider judicial
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  promote:
+    needs: [bcr, judicial]
+    if: always() && (needs.bcr.result == 'success' || needs.judicial.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run python -m remates_scraper.jobs.run_job promote
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WEBHOOK_REVALIDATE_URL: ${{ secrets.WEBHOOK_REVALIDATE_URL }}
+          WEBHOOK_REVALIDATE_TOKEN: ${{ secrets.WEBHOOK_REVALIDATE_TOKEN }}
+
+  enrich:
+    needs: [promote]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: Geocode
+        run: uv run python -m remates_scraper.jobs.run_job geocode
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Images
+        run: uv run python -m remates_scraper.jobs.run_job images
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+
+  reconcile:
+    needs: [enrich]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run python -m remates_scraper.jobs.run_job reconcile
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
