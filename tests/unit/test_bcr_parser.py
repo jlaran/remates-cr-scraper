@@ -33,3 +33,4 @@ def test_parse_detail_extracts_required_fields():
     )
     assert "auctions" in detail
     assert "image_urls" in detail
+    assert detail["for_sale_kind"] == "direct_sale"

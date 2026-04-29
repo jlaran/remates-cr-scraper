@@ -83,6 +83,7 @@ def parse_edicto(block: str) -> dict[str, Any] | None:
     title = _build_title(property_type, finca, juzgado)
 
     return {
+        "for_sale_kind": "auction",
         "title": title,
         "description": _condense(block),
         "image_urls": [],

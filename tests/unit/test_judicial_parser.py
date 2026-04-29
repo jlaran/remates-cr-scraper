@@ -37,6 +37,8 @@ def test_parse_edicto_extracts_required_fields() -> None:
             continue
         parsed_count += 1
 
+        assert result["for_sale_kind"] == "auction"
+
         # Mandatory: title must be non-empty
         assert result["title"]
 

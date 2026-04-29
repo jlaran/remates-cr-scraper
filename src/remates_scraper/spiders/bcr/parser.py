@@ -130,8 +130,11 @@ def parse_listings_page(html: str) -> list[dict[str, Any]]:
 def parse_detail_page(html: str, source_url: str) -> dict[str, Any]:
     """Return the full normalized listing dict from a BCR detail page.
 
-    Keys returned: title, description, image_urls, base_price, currency,
-    province, canton, property_type, auctions, meta, source_url.
+    BCR sells via direct negotiated sale (not judicial auction), so
+    for_sale_kind is always "direct_sale".
+
+    Keys returned: for_sale_kind, title, description, image_urls, base_price,
+    currency, province, canton, property_type, auctions, meta, source_url.
     """
     sel = Selector(text=html)
 
@@ -181,6 +184,7 @@ def parse_detail_page(html: str, source_url: str) -> dict[str, Any]:
     }
 
     return {
+        "for_sale_kind": "direct_sale",
         "title": title,
         "description": description,
         "image_urls": image_urls,
