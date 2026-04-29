@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import io
-from typing import Optional
 
 import httpx
 from PIL import Image
@@ -19,7 +18,7 @@ def download(url: str, timeout: float = 30.0) -> bytes:
     return r.content
 
 
-def validate_mime(data: bytes) -> Optional[str]:
+def validate_mime(data: bytes) -> str | None:
     try:
         img = Image.open(io.BytesIO(data))
         img.verify()
@@ -40,7 +39,7 @@ def resize_to_width(data: bytes, target_width: int, quality: int = 82) -> tuple[
     if w <= target_width:
         return data, w, h
     new_h = int(h * target_width / w)
-    img = img.resize((target_width, new_h), Image.LANCZOS)
+    img = img.resize((target_width, new_h), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=quality, optimize=True)
     return buf.getvalue(), target_width, new_h

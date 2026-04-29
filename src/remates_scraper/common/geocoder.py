@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Literal
 
 import httpx
+from psycopg.rows import dict_row
 
 from .db import connect
 
@@ -26,7 +27,7 @@ PROVINCE_ALIASES = {
 }
 
 
-def normalize_province(text: str) -> Optional[str]:
+def normalize_province(text: str) -> str | None:
     """Map any variant of a Costa Rican province name to its canonical form."""
     return PROVINCE_ALIASES.get(text.strip().lower())
 
@@ -40,8 +41,8 @@ class GeocodeResult:
 
 def geocode(
     query: str,
-    province: Optional[str] = None,
-    canton: Optional[str] = None,
+    province: str | None = None,
+    canton: str | None = None,
 ) -> GeocodeResult:
     """Return lat/lng for an address. Uses cache -> Nominatim -> canton -> provincia."""
     cached = _cache_get(query)
@@ -66,7 +67,7 @@ def geocode(
     return GeocodeResult(9.9281, -84.0907, "unknown")  # San José as last fallback
 
 
-def _try_nominatim(query: str) -> Optional[GeocodeResult]:
+def _try_nominatim(query: str) -> GeocodeResult | None:
     try:
         r = httpx.get(
             "https://nominatim.openstreetmap.org/search",
@@ -83,20 +84,20 @@ def _try_nominatim(query: str) -> Optional[GeocodeResult]:
         return None
 
 
-def _canton_centroid(name: str) -> Optional[tuple[float, float]]:
-    with connect() as conn, conn.cursor() as cur:
+def _canton_centroid(name: str) -> tuple[float, float] | None:
+    with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT ST_Y(centroid) AS lat, ST_X(centroid) AS lng "
             "FROM cantones_cr WHERE LOWER(name) = LOWER(%s) LIMIT 1",
             (name,),
         )
-        row = cur.fetchone()
+        row: dict[str, Any] | None = cur.fetchone()
         if not row:
             return None
         return float(row["lat"]), float(row["lng"])
 
 
-def _province_centroid(name: str) -> Optional[tuple[float, float]]:
+def _province_centroid(name: str) -> tuple[float, float] | None:
     centroids = {
         "San José": (9.9281, -84.0907),
         "Alajuela": (10.0162, -84.2117),
@@ -109,14 +110,14 @@ def _province_centroid(name: str) -> Optional[tuple[float, float]]:
     return centroids.get(name)
 
 
-def _cache_get(query: str) -> Optional[tuple[float, float]]:
-    with connect() as conn, conn.cursor() as cur:
+def _cache_get(query: str) -> tuple[float, float] | None:
+    with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "UPDATE geocoding_cache SET hit_count = hit_count + 1, last_used_at = now() "
             "WHERE query_text = %s RETURNING lat, lng",
             (query,),
         )
-        row = cur.fetchone()
+        row: dict[str, Any] | None = cur.fetchone()
         conn.commit()
         return (row["lat"], row["lng"]) if row else None
 
