@@ -23,9 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.source == "bcr":
         from remates_scraper.spiders.bcr.spider import run
     elif args.source == "judicial":
-        # Will be implemented in Task 24 — not available yet
-        print("ERROR: judicial spider not yet implemented (Task 24)", file=sys.stderr)
-        return 2
+        from remates_scraper.spiders.judicial.spider import run
     else:
         parser.error(f"unknown source {args.source}")
         return 2
