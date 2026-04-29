@@ -1235,6 +1235,7 @@ source = { editable = "." }
 dependencies = [
     { name = "boto3" },
     { name = "httpx" },
+    { name = "parsel" },
     { name = "pdfplumber" },
     { name = "pillow" },
     { name = "playwright" },
@@ -1258,6 +1259,7 @@ dev = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.42.97" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "parsel", specifier = ">=1.11.0" },
     { name = "pdfplumber", specifier = ">=0.11.9" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "playwright", specifier = ">=1.58.0" },
