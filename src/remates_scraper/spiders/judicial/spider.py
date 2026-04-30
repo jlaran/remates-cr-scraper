@@ -1,4 +1,9 @@
-"""Boletín Judicial spider — downloads latest PDF, segments edictos, writes raw_listings."""
+"""La Gaceta spider — downloads latest official-publication PDF, segments edictos, writes raw_listings.
+
+Originally targeted the Boletín Judicial, but Imprenta Nacional discontinued that feed
+in late 2023. La Gaceta is the active official publication that carries remate edictos.
+URL pattern: /pub/<YYYY>/<MM>/<DD>/COMP_<DD>_<MM>_<YYYY>.pdf
+"""
 from __future__ import annotations
 
 import logging
@@ -12,9 +17,9 @@ from remates_scraper.common.pipeline import ScrapeRunContext, upsert_raw_listing
 from remates_scraper.spiders.judicial.parser import parse_edicto
 
 USER_AGENT = "remates.cr/0.1 (+https://remates.cr)"
-BASE_URL = "https://www.imprentanacional.go.cr/pub-boletin"
+BASE_URL = "https://www.imprentanacional.go.cr/pub"
 MAX_DAYS_BACK = 14
-DOWNLOAD_TIMEOUT = 60.0
+DOWNLOAD_TIMEOUT = 120.0  # Gaceta PDFs can be 4–10 MB
 
 log = logging.getLogger(__name__)
 
@@ -22,9 +27,9 @@ log = logging.getLogger(__name__)
 def run() -> dict[str, int]:
     pdf_url, pdf_bytes = _download_latest_boletin()
     if pdf_url is None:
-        raise RuntimeError(f"no Boletín PDF found in the last {MAX_DAYS_BACK} days")
+        raise RuntimeError(f"no Gaceta PDF found in the last {MAX_DAYS_BACK} days")
 
-    tmp = Path("/tmp") / f"boletin_{date.today().isoformat()}.pdf"
+    tmp = Path("/tmp") / f"gaceta_{date.today().isoformat()}.pdf"
     tmp.write_bytes(pdf_bytes)
     log.info("downloaded %s (%d bytes) to %s", pdf_url, len(pdf_bytes), tmp)
 
@@ -68,34 +73,39 @@ def run() -> dict[str, int]:
 
 
 def _download_latest_boletin() -> tuple[str | None, bytes]:
-    """Try last MAX_DAYS_BACK dates, return (url, content) of the first that exists."""
+    """Try last MAX_DAYS_BACK dates, return (url, content) of the first that exists.
+
+    The Imprenta Nacional server returns 200 with `Acceso no valido` HTML for missing
+    files, so we verify the GET response's content-type AND magic bytes to confirm it's
+    actually a PDF.
+    """
     headers = {"User-Agent": USER_AGENT}
     for days_back in range(0, MAX_DAYS_BACK):
         d = date.today() - timedelta(days=days_back)
-        url = (
-            f"{BASE_URL}/{d.year}/{d.strftime('%m')}/"
-            f"bol_{d.strftime('%d')}_{d.strftime('%m')}_{d.year}.pdf"
-        )
+        # La Gaceta URL pattern: /pub/<YYYY>/<MM>/<DD>/COMP_<DD>_<MM>_<YYYY>.pdf
+        yyyy = d.strftime("%Y")
+        mm = d.strftime("%m")
+        dd = d.strftime("%d")
+        url = f"{BASE_URL}/{yyyy}/{mm}/{dd}/COMP_{dd}_{mm}_{yyyy}.pdf"
         try:
             with httpx.Client(
                 headers=headers, follow_redirects=True, timeout=DOWNLOAD_TIMEOUT
             ) as client:
-                # HEAD first to avoid downloading large PDFs we don't need
-                head_response = client.head(url)
-                if head_response.status_code != 200:
-                    log.debug("HEAD %s -> %d", url, head_response.status_code)
+                response = client.get(url)
+                if response.status_code != 200:
+                    log.debug("GET %s -> %d", url, response.status_code)
                     continue
-                # Some servers return text/html for missing PDFs even with 200 — verify content-type
-                ctype = head_response.headers.get("content-type", "").lower()
+                ctype = response.headers.get("content-type", "").lower()
                 if "pdf" not in ctype:
-                    log.debug("HEAD %s content-type=%s, skipping", url, ctype)
+                    log.debug("GET %s content-type=%s, skipping", url, ctype)
                     continue
-                full_response = client.get(url)
-                if full_response.status_code != 200:
-                    log.debug("GET %s -> %d", url, full_response.status_code)
+                # Verify magic bytes — Imprenta sometimes returns 200 with HTML body
+                if not response.content.startswith(b"%PDF"):
+                    log.debug("GET %s content not PDF (first bytes %r), skipping",
+                              url, response.content[:8])
                     continue
-                log.info("found Boletín at %s", url)
-                return url, full_response.content
+                log.info("found Gaceta at %s (%d bytes)", url, len(response.content))
+                return url, response.content
         except httpx.HTTPError as e:
             log.debug("URL %s failed: %s", url, e)
             continue
