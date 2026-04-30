@@ -16,10 +16,10 @@ from remates_scraper.spiders.bcr.parser import (
     parse_listings_page,
 )
 
-# Property types to iterate. BCR site exposes at least Casas (1), Apartamentos (2), Lotes (3).
-# Confirmed via fixture inspection and site structure; extend if new types appear.
+# Property types and their URL section paths (confirmed against the live BCR portal).
+# Casas (1) uses capitalized path; comercio (2) and terrenos (3) use lowercase.
 PROPERTY_TYPES = [1, 2, 3]
-SECTION_BY_TYPE = {1: "Casas", 2: "Apartamentos", 3: "Lotes"}
+SECTION_BY_TYPE = {1: "Casas", 2: "comercio", 3: "terrenos"}
 LISTINGS_URL_TEMPLATE = (
     "https://ventadebienes.bancobcr.com/wps/portal/bcrb/bcrbienes/bienes/{section}"
     "?&tipo_propiedad={tipo}"
