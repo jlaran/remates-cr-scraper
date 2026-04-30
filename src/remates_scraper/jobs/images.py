@@ -11,6 +11,10 @@ from remates_scraper.common.storage import R2Storage
 
 log = logging.getLogger(__name__)
 
+# Referer sent when downloading images that belong to BCR listings.
+# BCR's Radware-protected WCM CDN may reject requests without a Referer header.
+BCR_REFERER = "https://ventadebienes.bancobcr.com/"
+
 
 def run(batch: int = 100) -> dict[str, int]:
     storage = R2Storage()
@@ -20,10 +24,12 @@ def run(batch: int = 100) -> dict[str, int]:
     with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
-            SELECT id, listing_id, source_url
-            FROM listing_images
-            WHERE r2_key IS NULL
-            ORDER BY id ASC
+            SELECT li.id, li.listing_id, li.source_url AS img_url,
+                   l.source_id
+            FROM listing_images li
+            JOIN listings l ON l.id = li.listing_id
+            WHERE li.r2_key IS NULL
+            ORDER BY li.id ASC
             LIMIT %s
             """,
             (batch,),
@@ -32,7 +38,11 @@ def run(batch: int = 100) -> dict[str, int]:
 
     for row in rows:
         try:
-            data = download(row["source_url"])
+            referer: str | None = None
+            if row["source_id"] == "bcr":
+                referer = BCR_REFERER
+
+            data = download(row["img_url"], referer=referer)
             mime = validate_mime(data)
             if mime is None:
                 failed += 1

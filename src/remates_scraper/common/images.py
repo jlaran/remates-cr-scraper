@@ -10,8 +10,11 @@ ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
 MAX_BYTES = 10 * 1024 * 1024
 
 
-def download(url: str, timeout: float = 30.0) -> bytes:
-    r = httpx.get(url, timeout=timeout, follow_redirects=True)
+def download(url: str, timeout: float = 30.0, referer: str | None = None) -> bytes:
+    headers: dict[str, str] = {}
+    if referer:
+        headers["Referer"] = referer
+    r = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
     r.raise_for_status()
     if len(r.content) > MAX_BYTES:
         raise ValueError(f"image larger than {MAX_BYTES} bytes")

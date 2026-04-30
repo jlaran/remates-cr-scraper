@@ -41,6 +41,8 @@ DETAIL_LINK_SELECTOR = "div.bienImgBox a::attr(href)"
 ITEM_TITLE_SELECTOR = "div.block-with-text b::text"
 # Price is inside the first cell50 b tag
 ITEM_PRICE_SELECTOR = "div.table-cell.cell50 b::text"
+# Thumbnail image inside each card (WCM CDN URL)
+ITEM_IMAGE_SELECTOR = "div.bienImgBox img[src*='/wps/wcm/']::attr(src)"
 
 # ------------------------------------------------------------------
 # Detail-page selectors (confirmed against real fixture)
@@ -95,11 +97,12 @@ def normalize_listings_item(item: dict[str, Any]) -> dict[str, Any]:
         item.get("canton_raw", ""),
     )
     title = item.get("title", "")
+    image_urls = [item["image_url"]] if item.get("image_url") else []
     return {
         "for_sale_kind": "direct_sale",
         "title": title,
         "description": "",
-        "image_urls": [],
+        "image_urls": image_urls,
         "base_price": base_price,
         "currency": currency,
         "province": province,
@@ -120,9 +123,14 @@ def normalize_listings_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_listings_page(html: str) -> list[dict[str, Any]]:
-    """Return a list of dicts: {external_id, detail_url, title, raw_price, province, canton}.
+    """Return raw item dicts from the BCR listing page.
+
+    Each dict contains: external_id, detail_url, title, raw_price, province_raw,
+    canton_raw, image_url.  ``image_url`` is an absolute WCM CDN URL or empty string.
 
     Parses ``div.table-row.miniatura`` elements from the BCR property listing page.
+    Each card contains a WCM-hosted thumbnail image whose absolute URL is captured
+    in ``image_url`` (empty string when absent).
     """
     sel = Selector(text=html)
     items: list[dict[str, Any]] = []
@@ -145,6 +153,10 @@ def parse_listings_page(html: str) -> list[dict[str, Any]]:
         province_raw = cell50_texts[0] if len(cell50_texts) > 0 else ""
         canton_raw = cell50_texts[1] if len(cell50_texts) > 1 else ""
 
+        # Thumbnail image from the listings card (WCM CDN)
+        img_src = (card.css(ITEM_IMAGE_SELECTOR).get() or "").strip()
+        image_url = urljoin(BASE, img_src) if img_src else ""
+
         external_id = _extract_external_id(href)
         detail_url = urljoin(BASE, href)
 
@@ -159,6 +171,7 @@ def parse_listings_page(html: str) -> list[dict[str, Any]]:
                 "raw_price": raw_price,
                 "province_raw": province_raw,
                 "canton_raw": canton_raw,
+                "image_url": image_url,
             }
         )
 

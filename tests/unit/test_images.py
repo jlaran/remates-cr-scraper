@@ -1,8 +1,9 @@
 import io
+from unittest.mock import patch
 
 from PIL import Image
 
-from remates_scraper.common.images import resize_to_width, validate_mime
+from remates_scraper.common.images import download, resize_to_width, validate_mime
 
 
 def test_resize_preserves_aspect_ratio():
@@ -23,3 +24,23 @@ def test_validate_mime_accepts_jpeg():
 
 def test_validate_mime_rejects_unknown():
     assert validate_mime(b"not an image") is None
+
+
+def test_download_passes_referer():
+    with patch("remates_scraper.common.images.httpx.get") as mock_get:
+        mock_get.return_value.content = b"x"
+        mock_get.return_value.raise_for_status = lambda: None
+        download("https://example.com/img.jpg", referer="https://referer.example/")
+        mock_get.assert_called_once()
+        kwargs = mock_get.call_args.kwargs
+        assert kwargs.get("headers", {}).get("Referer") == "https://referer.example/"
+
+
+def test_download_no_referer_sends_empty_headers():
+    with patch("remates_scraper.common.images.httpx.get") as mock_get:
+        mock_get.return_value.content = b"x"
+        mock_get.return_value.raise_for_status = lambda: None
+        download("https://example.com/img.jpg")
+        mock_get.assert_called_once()
+        kwargs = mock_get.call_args.kwargs
+        assert kwargs.get("headers", {}) == {}
