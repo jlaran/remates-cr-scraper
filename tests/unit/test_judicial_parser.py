@@ -1,65 +1,57 @@
-from pathlib import Path
-
-from remates_scraper.common.pdf import extract_text, find_edicto_blocks
 from remates_scraper.spiders.judicial.parser import parse_edicto
 
-FIX = Path(__file__).parent.parent / "fixtures" / "judicial"
+# A minimal synthetic remate edicto block that exercises all parser paths.
+# The succession-only PDF fixture (Boletín Nº 195, 2023-10-23) contains no
+# remate notices; after segmentation tightening it yields 0 blocks.
+# We use an inline synthetic block to keep the parser unit-tested independently
+# from the PDF segmentation layer.
+SYNTHETIC_REMATE_BLOCK = (
+    "AVISO DE REMATE\n"
+    "Juzgado Civil y de Trabajo del Primer Circuito Judicial de San José.\n"
+    "Expediente: 23-000254-0504-CI-0. Se procede a la venta en remate público de la "
+    "finca N° 1-12345-000, ubicada en San José, canton Central, provincia San José. "
+    "Precio base: ₡85.000.000,00. El remate se celebrará el 15 de mayo del 2025.\n"
+    "—1 vez.—(IN2024123456)."
+)
 
-
-def _all_blocks() -> list[str]:
-    pages = extract_text(FIX / "sample_boletin.pdf")
-    return find_edicto_blocks("\n".join(pages))
+SYNTHETIC_NO_EXPEDIENTE = (
+    "Se remata una casa en Alajuela. remate el 10 de junio del 2025. "
+    "Precio base ₡50.000.000,00."
+)
 
 
 def test_parse_edicto_extracts_required_fields() -> None:
-    """At least one edicto block must parse with the mandatory fields.
+    """parse_edicto returns a valid listing dict for a well-formed remate block."""
+    result = parse_edicto(SYNTHETIC_REMATE_BLOCK)
+    assert result is not None, "parser must succeed on a complete remate block"
 
-    Notes on fixture adaptation
-    ---------------------------
-    The fixture (Boletín Judicial Nº 195, 2023-10-23) is a succession-only
-    issue that contains no auction notices (remates) and therefore no price
-    information.  The parser still extracts the fields that are present:
-    - expediente number (required — block is skipped if missing)
-    - province (detected from text; falls back to "San José")
-    - auctions list (populated from any Spanish dates in the block)
-    - base_price is 0.0 when the block has no price text (accepted here)
+    assert result["for_sale_kind"] == "auction"
 
-    In production, boletines that include "AVISO DE REMATE" sections will
-    have full price + auction data.
-    """
-    blocks = _all_blocks()
-    assert blocks, "fixture has no blocks"
+    # Mandatory: title must be non-empty
+    assert result["title"]
 
-    parsed_count = 0
-    for block in blocks:
-        result = parse_edicto(block)
-        if result is None:
-            continue
-        parsed_count += 1
+    # currency is always set (defaults to CRC)
+    assert result["currency"] in ("CRC", "USD")
 
-        assert result["for_sale_kind"] == "auction"
+    # expediente must be present (parse_edicto returns None without it)
+    assert result["meta"].get("expediente")
 
-        # Mandatory: title must be non-empty
-        assert result["title"]
+    # auctions list is present (may be empty if no Spanish dates found)
+    assert "auctions" in result
 
-        # currency is always set (defaults to CRC)
-        assert result["currency"] in ("CRC", "USD")
+    # province must be a valid Costa Rican province or the default
+    assert result["province"] in (
+        "San José",
+        "Alajuela",
+        "Cartago",
+        "Heredia",
+        "Guanacaste",
+        "Puntarenas",
+        "Limón",
+    )
 
-        # expediente must be present (parse_edicto returns None without it)
-        assert result["meta"].get("expediente")
 
-        # auctions list is present (may be empty if no Spanish dates found)
-        assert "auctions" in result
-
-        # province must be a valid Costa Rican province or the default
-        assert result["province"] in (
-            "San José",
-            "Alajuela",
-            "Cartago",
-            "Heredia",
-            "Guanacaste",
-            "Puntarenas",
-            "Limón",
-        )
-
-    assert parsed_count > 0, "no edicto could be parsed"
+def test_parse_edicto_returns_none_without_expediente() -> None:
+    """parse_edicto must return None when no expediente number is present."""
+    result = parse_edicto(SYNTHETIC_NO_EXPEDIENTE)
+    assert result is None, "block without expediente must be rejected"

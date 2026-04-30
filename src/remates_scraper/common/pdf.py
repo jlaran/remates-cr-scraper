@@ -13,10 +13,6 @@ EDICTO_HEADERS = (
     "AVISOS DE REMATE",
     "EDICTO DE REMATE",
     "EDICTOS DE REMATE",
-    "AVISO JUDICIAL",
-    "AVISOS JUDICIALES",
-    # Fallback section headers found in succession-only issues
-    "ADMINISTRACIÓN JUDICIAL",
 )
 
 # Terminators: each individual notice ends with this pattern in the Boletín
@@ -80,14 +76,11 @@ def _looks_like_remate_edicto(text: str) -> bool:
 
 
 def _looks_like_judicial_notice(text: str) -> bool:
-    """Return True if *text* looks like any judicial/notarial notice."""
+    """Return True if *text* looks like a remate/subasta judicial notice.
+
+    Requires the word "remate" or "subasta" to appear in the block.
+    Broader terms (sucesorio, expediente, juzgado, notaría) are dropped
+    because they generate too many false positives from notarial content.
+    """
     lower = text.lower()
-    has_content = (
-        "sucesorio" in lower
-        or "expediente" in lower
-        or "juzgado" in lower
-        or "notaría" in lower
-        or "remate" in lower
-        or "subasta" in lower
-    )
-    return has_content and len(text) > 100
+    return ("remate" in lower or "subasta" in lower) and len(text) > 100

@@ -1,4 +1,6 @@
-"""La Gaceta spider — downloads latest official-publication PDF, segments edictos, writes raw_listings.
+"""La Gaceta spider — downloads latest official-publication PDF.
+
+Segments edictos and writes raw_listings.
 
 Originally targeted the Boletín Judicial, but Imprenta Nacional discontinued that feed
 in late 2023. La Gaceta is the active official publication that carries remate edictos.
@@ -43,14 +45,9 @@ def run() -> dict[str, int]:
             try:
                 parsed = parse_edicto(block)
                 if parsed is None:
+                    # Block was not a parseable remate edicto — skip silently
                     run_ctx.items_failed += 1
-                    upsert_raw_listing(
-                        run_id=run_ctx.id,
-                        source_id="judicial",
-                        external_id=f"{date.today().isoformat()}-{idx}-unparsed",
-                        source_url=pdf_url,
-                        payload={"unparsed_text": block},
-                    )
+                    log.debug("block #%d did not parse as remate edicto, skipping", idx)
                     continue
                 parsed["source_url"] = pdf_url
                 ext_id = parsed["meta"]["expediente"]

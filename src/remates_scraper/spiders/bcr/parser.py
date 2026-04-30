@@ -81,6 +81,44 @@ PROPERTY_TYPE_KEYWORDS: list[tuple[str, str]] = [
 # Public API
 # ------------------------------------------------------------------
 
+def normalize_listings_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert a raw listings-page item dict into a canonical payload.
+
+    Accepts the dict returned by ``parse_listings_page`` and returns a
+    partial listing payload (same schema as ``parse_detail_page``) using
+    only data available from the card.  Fields that require the detail
+    page are left as empty defaults.
+    """
+    base_price, currency = _parse_price(item.get("raw_price", ""))
+    province, canton = _parse_location_raw(
+        item.get("province_raw", ""),
+        item.get("canton_raw", ""),
+    )
+    title = item.get("title", "")
+    return {
+        "for_sale_kind": "direct_sale",
+        "title": title,
+        "description": "",
+        "image_urls": [],
+        "base_price": base_price,
+        "currency": currency,
+        "province": province,
+        "canton": canton,
+        "property_type": _classify_property_type(title),
+        "auctions": [],
+        "meta": {
+            "folio_real": item.get("external_id", ""),
+            "area_terreno": "",
+            "area_construccion": "",
+            "distrito": "",
+            "direccion": "",
+            "descuento_pct": "",
+            "ejecutivo": "",
+        },
+        "source_url": item.get("detail_url", ""),
+    }
+
+
 def parse_listings_page(html: str) -> list[dict[str, Any]]:
     """Return a list of dicts: {external_id, detail_url, title, raw_price, province, canton}.
 
@@ -252,6 +290,25 @@ def _parse_price(raw: str) -> tuple[float, str]:
         return float(cleaned), currency
     except ValueError:
         return 0.0, currency
+
+
+def _parse_location_raw(province_raw: str, canton_raw: str) -> tuple[str, str]:
+    """Normalize already-split province/canton strings from the listings page.
+
+    Both inputs arrive in UPPERCASE (e.g. "SAN JOSE", "DESAMPARADOS").
+    Returns (province_normalized, canton_title_case).
+    """
+    province_key = province_raw.upper().strip()
+    province = PROVINCES.get(province_key, "")
+    if not province:
+        for key, val in PROVINCES.items():
+            if key in province_key:
+                province = val
+                break
+    if not province:
+        province = "San José"
+    canton = canton_raw.strip().title()
+    return province, canton
 
 
 def _parse_location(location_text: str) -> tuple[str, str]:
