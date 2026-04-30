@@ -13,14 +13,20 @@ Listings page (listings_page.html):
       * Folio real / external_id: ``codigo`` query param in the href
   - ``codigo`` query-string parameter in the href is the canonical external_id.
 
-Detail page (sample_detail.html):
+Detail page (sample_detail.html, sample_detail_live.html):
   - Title        : ``h1::text``
   - Location     : ``label.textType2.strongText.mainTitle::text`` (e.g. ``ALAJUELA, SAN RAMÓN``)
   - Folio label  : ``label.textType3.strongText::text`` (e.g. ``Folio Nº 2-417772-000``)
-  - Field labels : ``label.title`` + adjacent ``label.strongText`` or ``p.descripcion``
-      * "precio inicial:"  → base price
-      * "descuento:"       → discount percentage (optional)
-  - Images       : ``img[src*="/wps/wcm/"]::attr(src)`` (WCM-served asset URLs)
+  - Field labels : ``label.title`` elements paired with the second plain ``<label>``
+    sibling in the same cell (no class), OR ``label.strongText``, OR ``p.descripcion``.
+      * Fields found: "precio inicial:", "precio de venta final:", "descuento:",
+        "monto del descuento:", "área del terreno:", "área de construcción:",
+        "distrito:", "dirección:", "descripción:"
+  - Cell-33 grid : ``div.table-cell.cell33 p`` — key: value pairs (e.g. "Nº Habitaciones: 3")
+      * Keys scraped: "nº habitaciones", "nº baños", "cochera" (garage present flag)
+  - Plano link   : ``a:contains('plano')::attr(href)`` → absolute WCM PDF URL
+  - Images       : ``img[src*="/wps/wcm/"]::attr(src)`` (WCM-served gallery images)
+  - Ejecutivo    : plain ``<label>`` following ``label:contains('Ejecutivo de venta:')``
   - No auction date present — BCR sells via direct negotiated sale.
 """
 from __future__ import annotations
@@ -185,7 +191,8 @@ def parse_detail_page(html: str, source_url: str) -> dict[str, Any]:
     for_sale_kind is always "direct_sale".
 
     Keys returned: for_sale_kind, title, description, image_urls, base_price,
-    currency, province, canton, property_type, auctions, meta, source_url.
+    currency, province, canton, property_type, bedrooms, bathrooms,
+    parking_spots, construction_size_m2, lot_size_m2, auctions, meta, source_url.
     """
     sel = Selector(text=html)
 
@@ -195,7 +202,7 @@ def parse_detail_page(html: str, source_url: str) -> dict[str, Any]:
     location_text = (sel.css(DETAIL_LOCATION).get() or "").strip()
     province, canton = _parse_location(location_text)
 
-    # Field map built from label.title → adjacent value
+    # Field map built from label.title → adjacent value (plain label or strongText or p.descripcion)
     field_map = _build_field_map(sel)
 
     # Price — "precio inicial:" is the authoritative asking price
@@ -224,14 +231,37 @@ def parse_detail_page(html: str, source_url: str) -> dict[str, Any]:
     folio_match = re.search(r"([\w-]+(?:-F)?-\d+)", folio_text)
     folio = folio_match.group(1) if folio_match else folio_text
 
+    # Area fields: parse numeric m² value from strings like "39.045,46 m²" or "165,00 m²"
+    area_terreno_raw = field_map.get("área del terreno:", "")
+    area_construccion_raw = field_map.get("área de construcción:", "")
+    lot_size_m2 = _parse_area_m2(area_terreno_raw)
+    construction_size_m2 = _parse_area_m2(area_construccion_raw)
+
+    # Cell-33 feature grid: "Nº Habitaciones: 3", "Nº Baños: 2", etc.
+    grid = _parse_cell33_grid(sel)
+    bedrooms = _parse_int(grid.get("nº habitaciones", ""))
+    bathrooms = _parse_int(grid.get("nº baños", ""))
+    # "Cochera: Sí/No" — treat "sí" as 1 parking spot when no explicit count
+    cochera_val = grid.get("cochera", "").lower()
+    parking_spots = _parse_int(grid.get("nº parqueos", grid.get("parqueos", "")))
+    if parking_spots == 0 and cochera_val == "sí":
+        parking_spots = 1
+
+    # Plano catastrado PDF link
+    plano_url = _extract_plano_url(sel)
+
+    # Ejecutivo de venta
+    ejecutivo = _extract_ejecutivo(sel)
+
     meta: dict[str, Any] = {
         "folio_real": folio,
-        "area_terreno": field_map.get("área del terreno:", ""),
-        "area_construccion": field_map.get("área de construcción:", ""),
+        "area_terreno": area_terreno_raw,
+        "area_construccion": area_construccion_raw,
         "distrito": field_map.get("distrito:", ""),
         "direccion": field_map.get("dirección:", ""),
         "descuento_pct": field_map.get("descuento:", ""),
-        "ejecutivo": "",
+        "ejecutivo": ejecutivo,
+        "plano_url": plano_url,
     }
 
     return {
@@ -244,6 +274,11 @@ def parse_detail_page(html: str, source_url: str) -> dict[str, Any]:
         "province": province,
         "canton": canton,
         "property_type": property_type,
+        "bedrooms": bedrooms,
+        "bathrooms": bathrooms,
+        "parking_spots": parking_spots,
+        "construction_size_m2": construction_size_m2,
+        "lot_size_m2": lot_size_m2,
         "auctions": auctions,
         "meta": meta,
         "source_url": source_url,
@@ -253,6 +288,38 @@ def parse_detail_page(html: str, source_url: str) -> dict[str, Any]:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+def _parse_area_m2(raw: str) -> float:
+    """Parse an area string like ``"39.045,46 m²"`` or ``"165,00 m²"`` → float.
+
+    Uses Costa Rican number format: dots as thousands separators, comma as decimal.
+    Returns 0.0 when the value cannot be parsed.
+    """
+    if not raw:
+        return 0.0
+    # Extract the numeric portion (digits, dots, commas)
+    m = re.search(r"([\d.,]+)", raw)
+    if not m:
+        return 0.0
+    num_str = m.group(1)
+    # CR format: multiple dots → thousands separators; comma → decimal point
+    if "," in num_str:
+        num_str = num_str.replace(".", "").replace(",", ".")
+    else:
+        parts = num_str.split(".")
+        if len(parts) > 2:
+            num_str = num_str.replace(".", "")
+    try:
+        return float(num_str)
+    except ValueError:
+        return 0.0
+
+
+def _parse_int(raw: str) -> int:
+    """Extract the first integer from a string.  Returns 0 when not found."""
+    m = re.search(r"\d+", raw)
+    return int(m.group()) if m else 0
+
 
 def _extract_external_id(href: str) -> str:
     """Extract the ``codigo`` query parameter from a BCR detail URL.
@@ -365,8 +432,11 @@ def _classify_property_type(title: str) -> str:
 def _build_field_map(sel: Selector) -> dict[str, str]:
     """Build a {label_text: value_text} map from ``label.title`` elements.
 
-    Each label.title sits in one cell of a two-cell row; the value is either
-    in an adjacent ``label.strongText`` element or in a ``p.descripcion`` element.
+    Each label.title sits in one cell; the value may be:
+      1. A sibling ``label.strongText`` (classed value label).
+      2. A second plain ``<label>`` in the same cell (no class) — used for
+         "área del terreno:" and "área de construcción:" rows.
+      3. A ``p.descripcion`` element in the same row.
     """
     field_map: dict[str, str] = {}
     for label in sel.css("label.title"):
@@ -374,23 +444,31 @@ def _build_field_map(sel: Selector) -> dict[str, str]:
         if not key:
             continue
 
-        # The value is the next sibling label.strongText or p.descripcion
         parent_cell = label.xpath("..")
         parent_row = parent_cell.xpath("..")
 
-        # Look for strongText sibling in the same cell first
+        # 1. Look for strongText sibling in the same cell first
         strong_val = (parent_cell.css("label.strongText::text").get() or "").strip()
         if strong_val:
             field_map[key] = strong_val
             continue
 
-        # Look for strongText in any cell of the same row
-        row_strong = (parent_row.css("label.strongText::text").get() or "").strip()
-        if row_strong:
-            field_map[key] = row_strong
+        # 2. Look for any plain <label> in the same cell that is NOT the title label.
+        #    Collect all label texts in the cell; skip the key itself; use the first
+        #    non-empty remainder (strips whitespace from multi-line values).
+        cell_label_texts = [
+            " ".join(t.strip() for t in lbl.css("::text").getall()).strip()
+            for lbl in parent_cell.css("label")
+        ]
+        plain_val = next(
+            (t for t in cell_label_texts if t and t.rstrip(": ").lower() != key.rstrip(": ")),
+            "",
+        )
+        if plain_val:
+            field_map[key] = plain_val
             continue
 
-        # Look for p.descripcion in the same row
+        # 3. Look for p.descripcion in the same row
         desc_val = " ".join(
             t.strip()
             for t in parent_row.css("p.descripcion::text").getall()
@@ -398,15 +476,48 @@ def _build_field_map(sel: Selector) -> dict[str, str]:
         )
         if desc_val:
             field_map[key] = desc_val
-            continue
-
-        # Plain text in sibling cells (e.g. "área del terreno:" + plain text value)
-        cell_texts = [
-            t.strip()
-            for t in parent_row.css("div.table-cell::text").getall()
-            if t.strip() and t.strip() not in (key, key.rstrip(":") + ":")
-        ]
-        if cell_texts:
-            field_map[key] = cell_texts[0]
 
     return field_map
+
+
+def _parse_cell33_grid(sel: Selector) -> dict[str, str]:
+    """Parse the property feature grid (cell33 divs) into a lowercase key→value map.
+
+    Each ``div.table-cell.cell33 p`` contains text like ``"Nº Habitaciones: 3"``.
+    Returns e.g. {"nº habitaciones": "3", "nº baños": "2", "cochera": "sí"}.
+    """
+    grid: dict[str, str] = {}
+    for p in sel.css("div.table-cell.cell33 p"):
+        text = " ".join(t.strip() for t in p.css("::text").getall()).strip()
+        if ":" in text:
+            k, _, v = text.partition(":")
+            grid[k.strip().lower()] = v.strip()
+    return grid
+
+
+def _extract_plano_url(sel: Selector) -> str:
+    """Return the absolute URL of the plano catastrado PDF link, or empty string."""
+    for a in sel.css("a"):
+        link_text = " ".join(t.strip() for t in a.css("::text").getall()).strip().lower()
+        if "plano" in link_text:
+            href = (a.attrib.get("href") or "").strip()
+            if href:
+                return urljoin(BASE, href)
+    return ""
+
+
+def _extract_ejecutivo(sel: Selector) -> str:
+    """Return the sales executive name from the contact section, or empty string."""
+    for label in sel.css("label"):
+        text = " ".join(t.strip() for t in label.css("::text").getall()).strip()
+        if "ejecutivo de venta" in text.lower():
+            # The value is typically in the next sibling <label> or <span>
+            parent = label.xpath("..")
+            sibling_texts = []
+            for sib in parent.css("label, span"):
+                sib_text = " ".join(t.strip() for t in sib.css("::text").getall()).strip()
+                if "ejecutivo de venta" not in sib_text.lower():
+                    sibling_texts.append(sib_text)
+            if sibling_texts:
+                return sibling_texts[0]
+    return ""
